@@ -3,12 +3,12 @@ package common
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/hashicorp/go-azure-helpers/sender"
 	"github.com/hashicorp/terraform-plugin-sdk/meta"
 	"github.com/terraform-providers/terraform-provider-azurerm/azurerm/internal/features"
 	"github.com/terraform-providers/terraform-provider-azurerm/version"
@@ -40,7 +40,7 @@ func (o ClientOptions) ConfigureClient(c *autorest.Client, authorizer autorest.A
 	setUserAgent(c, o.TerraformVersion, o.PartnerId, o.DisableTerraformPartnerID)
 
 	c.Authorizer = authorizer
-	c.Sender = sender.BuildSender("AzureRM")
+	c.Sender = BuildSender()
 	c.SkipResourceProviderRegistration = o.SkipProviderReg
 	if !o.DisableCorrelationRequestID {
 		c.RequestInspector = withCorrelationRequestID(correlationRequestID())
@@ -71,4 +71,29 @@ func setUserAgent(client *autorest.Client, tfVersion, partnerID string, disableT
 	}
 
 	log.Printf("[DEBUG] AzureRM Client User Agent: %s\n", client.UserAgent)
+}
+
+func BuildSender() autorest.Sender {
+	return autorest.DecorateSender(&http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		},
+	}, withRequestLogging())
+}
+
+func withRequestLogging() autorest.SendDecorator {
+	return func(s autorest.Sender) autorest.Sender {
+		return autorest.SenderFunc(func(r *http.Request) (*http.Response, error) {
+
+			log.Printf("[TOMTOMTOM] Sending %q Request to %q", r.Method, r.URL)
+
+			resp, err := s.Do(r)
+			if resp != nil {
+				log.Printf("[TOMTOMTOM] Response was %q from %q", resp.Status, r.URL)
+			} else {
+				log.Printf("[TOMTOMTOM] No Response from %q", r.URL)
+			}
+			return resp, err
+		})
+	}
 }
